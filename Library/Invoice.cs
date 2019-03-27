@@ -11,24 +11,67 @@ namespace Recurly
         // The currently valid Invoice States
         public enum InvoiceState
         {
-            Open,
-            Collected,
+            Paid,
             Failed,
             PastDue,
             Processing,
-            Pending
+            Pending,
+            Closed,
+            Open,
+            Voided
         }
 
-        public enum RefundOrderPriority
+        public enum RefundMethod
         {
-            Credit,
-            Transaction
+            CreditFirst,
+            TransactionFirst,
+            AllCredit,
+            AllTransaction
         }
 
         public enum Collection
         {
             Automatic,
             Manual
+        }
+
+        public class RefundOptions {
+          /// <summary>
+          /// If credit line items exist on the invoice, this parameter
+          /// specifies which refund method to use first. Most relevant
+          /// in partial refunds, you can chose to refund credit back
+          /// to the account first or a transaction giving money back to
+          /// the customer first.
+          /// </summary>
+          public RefundMethod Method { get; set; }
+
+          /// <summary>
+          /// Designates that the refund transactions created are manual.
+          /// </summary>
+          public bool? ExternalRefund { get; set; }
+
+          /// <summary>
+          /// Customer notes to be applied to the refund credit invoice.
+          /// </summary>
+          public string CreditCustomerNotes { get; set; }
+
+          /// <summary>
+          /// Creates the manual transactions with this payment method.
+          /// Allowed if *external_refund* is true.
+          /// </summary>
+          public string PaymentMethod { get; set; }
+
+          /// <summary>
+          /// Sets this value as the *transaction_note* on the manual transactions
+          /// created. Allowed if *external_refund* is true.
+          /// </summary>
+          public string Description { get; set; }
+
+          /// <summary>
+          /// Sets this value as the *collected_at* on the manual transactions
+          /// created. Allowed if *external_refund* is true.
+          /// </summary>
+          public DateTime? RefundedAt { get; set; }
         }
 
         public string AccountCode { get; private set; }
@@ -44,7 +87,15 @@ namespace Recurly
         public int TaxInCents { get; protected set; }
         public int TotalInCents { get; protected set; }
         public string Currency { get; protected set; }
-        public int? NetTerms { get; set; }
+        public int? NetTerms
+        {
+            get{ return _netTerms; }
+            set { _netTerms = value; _netTermsChanged = true; }
+        }
+
+        private int? _netTerms;
+        private bool _netTermsChanged = false;
+
         public Collection CollectionMethod { get; set; }
         public DateTime? CreatedAt { get; private set; }
         public DateTime? UpdatedAt { get; private set; }
@@ -56,6 +107,8 @@ namespace Recurly
             set { _address = value; }
         }
         private Address _address;
+
+        public ShippingAddress ShippingAddress { get; private set; }
 
         /// <summary>
         /// Tax type as "vat" for VAT or "usst" for US Sales Tax.
@@ -70,10 +123,17 @@ namespace Recurly
         public string CustomerNotes { get; set; }
         public string TermsAndConditions { get; set; }
         public string VatReverseChargeNotes { get; set; }
-        public int SubtotalAfterDiscountInCents { get; set; }
+        public string GatewayCode { get; set; }
         public DateTime? AttemptNextCollectionAt { get; set; }
         public string RecoveryReason { get; set; }
         public string AllLineItemsLink { get; set; }
+
+        public int SubtotalBeforeDiscountInCents { get; set; }
+        public int? DiscountInCents { get; set; }
+        public int? BalanceInCents { get; set; }
+        public DateTime? DueOn { get; set; }
+        public string Type { get; set; }
+        public string Origin { get; set; }
 
         internal const string UrlPrefix = "/invoices/";
 
@@ -132,6 +192,17 @@ namespace Recurly
         }
 
         /// <summary>
+        /// Update an existing invoice
+        /// </summary>
+        public void Update()
+        {
+            // PUT /invoices/<invoice id>
+            Client.Instance.PerformRequest(Client.HttpRequestMethod.Put,
+                UrlPrefix + InvoiceNumber,
+                WriteUpdateXml);
+        }
+
+        /// <summary>
         /// Preview an invoice on an account using it's pending charges
         /// </summary>
         public void Preview(string accountCode)
@@ -151,11 +222,27 @@ namespace Recurly
         }
 
         /// <summary>
-        /// Marks an invoice as failed collection
+        /// Voids an invoice
         /// </summary>
-        public void MarkFailed()
+        public void Void()
         {
-            Client.Instance.PerformRequest(Client.HttpRequestMethod.Put, memberUrl() + "/mark_failed", ReadXml);
+            Client.Instance.PerformRequest(Client.HttpRequestMethod.Put, memberUrl() + "/void", ReadXml);
+        }
+
+        /// <summary>
+        /// Marks an invoice as failed. This returns a
+        /// new invoice collection and does not update the
+        /// this invoice object.
+        /// </summary>
+        /// <returns>New Invoice Collection</returns>
+        public InvoiceCollection MarkFailed()
+        {
+            var collection = new InvoiceCollection();
+            Client.Instance.PerformRequest(
+                Client.HttpRequestMethod.Put,
+                memberUrl() + "/mark_failed",
+                collection.ReadXml);
+            return collection;
         }
 
         /// <summary>
@@ -183,49 +270,148 @@ namespace Recurly
             return Invoices.Get(OriginalInvoiceNumberWithPrefix());
         }
 
-        /// <summary>
-        /// If enabled, allows specific line items and/or quantities to be refunded.
-        /// </summary>
-        /// <param name="adjustment"></param>
-        /// <param name="prorate"></param>
-        /// <param name="quantity"></param>
-        /// <returns>new Invoice object</returns>
-        public Invoice Refund(Adjustment adjustment, bool prorate = false, int quantity = 0, RefundOrderPriority refundPriority = RefundOrderPriority.Credit)
+        public TransactionList GetTransactions()
         {
-            var adjustments = new List<Adjustment>();
-            adjustments.Add(adjustment);
+            var transactions = new TransactionList();
+            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Get,
+                memberUrl() + "/transactions/",
+                transactions.ReadXmlList);
 
-            return Refund(adjustments, prorate, quantity, refundPriority);
+            return statusCode == HttpStatusCode.NotFound ? null : transactions;
         }
 
-        public Invoice Refund(IEnumerable<Adjustment> adjustments, bool prorate = false, int quantity = 0, RefundOrderPriority refundPriority = RefundOrderPriority.Credit)
+        /// <summary>
+        /// Allows specific line items / adjutsments to be refunded.
+        /// </summary>
+        /// <param name="adjustments">The list of adjustments to refund.</param>
+        /// <param name="options">The options for the refund invoice.</param>
+        /// <returns>new Invoice object</returns>
+        public Invoice Refund(IEnumerable<Adjustment> adjustments, RefundOptions options)
         {
-            var refunds = new RefundList(adjustments, prorate, quantity, refundPriority);
+            var refunds = new RefundList(adjustments, options);
             var invoice = new Invoice();
 
-            var response = Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,
+            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,
                 memberUrl() + "/refund",
                 refunds.WriteXml,
                 invoice.ReadXml);
 
-            if (HttpStatusCode.Created == response || HttpStatusCode.OK == response)
+            if (HttpStatusCode.Created == statusCode || HttpStatusCode.OK == statusCode)
                 return invoice;
             else
                 return null;
         }
 
-        public Invoice RefundAmount(int amountInCents, RefundOrderPriority refundPriority = RefundOrderPriority.Credit)
+        /// <summary>
+        /// Allows a single line-item / adjutsment to be refunded.
+        /// </summary>
+        /// <param name="adjustment">The adjustment to be refunded.</param>
+        /// <param name="options">The options for the refund invoice.</param>
+        /// <returns>new Invoice object</returns>
+        public Invoice Refund(Adjustment adjustment, RefundOptions options)
+        {
+            var adjustments = new List<Adjustment>();
+            adjustments.Add(adjustment);
+            return Refund(adjustments, options);
+        }
+
+        /// <summary>
+        /// Allows a specific line item and/or quantities to be refunded.
+        /// </summary>
+        /// <param name="adjustment"></param>
+        /// <param name="prorate"></param>
+        /// <param name="quantity"></param>
+        /// <param name="method"></param>
+        /// <returns>new Invoice object</returns>
+        [Obsolete("This method is deprecated, please use Refund(Adjustment, Invoice.RefundOptions).")]
+        public Invoice Refund(Adjustment adjustment, bool prorate = false, int quantity = 0, RefundMethod method = RefundMethod.CreditFirst)
+        {
+            var adjustments = new List<Adjustment>();
+            adjustments.Add(adjustment);
+
+            return Refund(adjustments, prorate, quantity, method);
+        }
+
+        /// <summary>
+        /// Allows specific line items and/or quantities to be refunded.
+        /// </summary>
+        /// <param name="adjustment"></param>
+        /// <param name="prorate"></param>
+        /// <param name="quantity"></param>
+        /// <param name="method"></param>
+        /// <returns>new Invoice object</returns>
+        [Obsolete("This method is deprecated, please use Refund(IEnumerable<Adjustment>, Invoice.RefundOptions).")]
+        public Invoice Refund(IEnumerable<Adjustment> adjustments, bool prorate = false, int quantity = 0, RefundMethod method = RefundMethod.CreditFirst)
+        {
+            var refunds = new RefundList(adjustments, prorate, quantity, method);
+            var invoice = new Invoice();
+
+            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,
+                memberUrl() + "/refund",
+                refunds.WriteXml,
+                invoice.ReadXml);
+
+            if (HttpStatusCode.Created == statusCode || HttpStatusCode.OK == statusCode)
+                return invoice;
+            else
+                return null;
+        }
+
+        /// <summary>
+        /// Allows you to refund a specific amount from an invoice.
+        /// </summary>
+        /// <param name="amountIncents">The amount in cents to refund from the invoice.</param>
+        /// <param name="options">The options for the refund invoice.</param>
+        /// <returns>new Invoice object</returns>
+        public Invoice RefundAmount(int amountInCents, RefundOptions options)
         {
             var refundInvoice = new Invoice();
-            var refund = new OpenAmountRefund(amountInCents, refundPriority);
-               
-            var response = Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,
+            var refund = new OpenAmountRefund(amountInCents, options);
+
+            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,
                 memberUrl() + "/refund",
                 refund.WriteXml,
                 refundInvoice.ReadXml);
 
-            if (HttpStatusCode.Created == response || HttpStatusCode.OK == response)
+            if (HttpStatusCode.Created == statusCode || HttpStatusCode.OK == statusCode)
                 return refundInvoice;
+            else
+                return null;
+        }
+
+        [Obsolete("This method is deprecated, please use RefundAmount(int, Invoice.RefundOptions).")]
+        public Invoice RefundAmount(int amountInCents, RefundMethod method = RefundMethod.CreditFirst)
+        {
+            var refundInvoice = new Invoice();
+            var refund = new OpenAmountRefund(amountInCents, method);
+
+            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,
+                memberUrl() + "/refund",
+                refund.WriteXml,
+                refundInvoice.ReadXml);
+
+            if (HttpStatusCode.Created == statusCode || HttpStatusCode.OK == statusCode)
+                return refundInvoice;
+            else
+                return null;
+        }
+
+        /// <summary>
+        /// Enter an offline payment for a manual invoice
+        /// </summary>
+        /// <param name="transaction">The transaction to be entered.</param>
+        /// <returns>new Transaction object</returns>
+        public Transaction EnterOfflinePayment(Transaction transaction)
+        {
+            var successfulTransaction = new Transaction();
+
+            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,
+                memberUrl() + "/transactions",
+                transaction.WriteOfflinePaymentXml,
+                successfulTransaction.ReadXml);
+
+            if (HttpStatusCode.Created == statusCode || HttpStatusCode.OK == statusCode)
+                return successfulTransaction;
             else
                 return null;
         }
@@ -234,13 +420,21 @@ namespace Recurly
 
         internal override void ReadXml(XmlTextReader reader)
         {
+            ReadXml(reader, "invoice");
+        }
+
+        internal void ReadXml(XmlTextReader reader, string nodeName)
+        {
             while (reader.Read())
             {
                 // End of invoice element, get out of here
-                if (reader.Name == "invoice" && reader.NodeType == XmlNodeType.EndElement)
+                if (reader.Name == nodeName && reader.NodeType == XmlNodeType.EndElement)
                     break;
 
                 if (reader.NodeType != XmlNodeType.Element) continue;
+
+                DateTime dt;
+                int m;
 
                 switch (reader.Name)
                 {
@@ -270,13 +464,14 @@ namespace Recurly
                         break;
 
                     case "state":
-                        State = reader.ReadElementContentAsString().ParseAsEnum<InvoiceState>();
+                        var state = reader.ReadElementContentAsString();
+                        if (!state.IsNullOrEmpty()) 
+                            State = state.ParseAsEnum<InvoiceState>();
                         break;
 
                     case "invoice_number":
-                        int invNumber;
-                        if (Int32.TryParse(reader.ReadElementContentAsString(), out invNumber))
-                            InvoiceNumber = invNumber;
+                        if (Int32.TryParse(reader.ReadElementContentAsString(), out m))
+                            InvoiceNumber = m;
                         break;
 
                     case "invoice_number_prefix":
@@ -308,21 +503,18 @@ namespace Recurly
                         break;
 
                     case "created_at":
-                        DateTime createdAt;
-                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out createdAt))
-                            CreatedAt = createdAt;
+                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out dt))
+                            CreatedAt = dt;
                         break;
 
                     case "updated_at":
-                        DateTime updatedAt;
-                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out updatedAt))
-                            UpdatedAt = updatedAt;
+                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out dt))
+                            UpdatedAt = dt;
                         break;                    
 
                     case "closed_at":
-                        DateTime closedAt;
-                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out closedAt))
-                            ClosedAt = closedAt;
+                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out dt))
+                            ClosedAt = dt;
                         break;
 
                     case "tax_type":
@@ -338,11 +530,16 @@ namespace Recurly
                         break;
 
                     case "net_terms":
-                        NetTerms = reader.ReadElementContentAsInt();
+                        if (int.TryParse(reader.ReadElementContentAsString(), out m))
+                        {
+                            _netTerms = m;
+                        }
                         break;
 
                     case "collection_method":
-                        CollectionMethod = reader.ReadElementContentAsString().ParseAsEnum<Collection>();
+                        var method = reader.ReadElementContentAsString();
+                        if (!method.IsNullOrEmpty())
+                            CollectionMethod = method.ParseAsEnum<Collection>();
                         break;
 
                     case "customer_notes":
@@ -355,6 +552,10 @@ namespace Recurly
 
                     case "vat_reverse_charge_notes":
                         VatReverseChargeNotes = reader.ReadElementContentAsString();
+                        break;
+
+                    case "gateway_code":
+                        GatewayCode = reader.ReadElementContentAsString();
                         break;
 
                     case "line_items":
@@ -373,16 +574,41 @@ namespace Recurly
                         Address = new Address(reader);
                         break;
 
-                    case "subtotal_after_discount_in_cents":
-                        int s;
-                        if (int.TryParse(reader.ReadElementContentAsString(), out s))
-                            SubtotalAfterDiscountInCents = s;
+                    case "shipping_address":
+                        ShippingAddress = new ShippingAddress(reader);
+                        break;
+
+                    case "subtotal_before_discount_in_cents":
+                        if (int.TryParse(reader.ReadElementContentAsString(), out m))
+                            SubtotalBeforeDiscountInCents = m;
+                        break;
+
+                    case "discount_in_cents":
+                        if (int.TryParse(reader.ReadElementContentAsString(), out m))
+                            DiscountInCents = m;
+                        break;
+
+                    case "balance_in_cents":
+                        if (int.TryParse(reader.ReadElementContentAsString(), out m))
+                            BalanceInCents = m;
+                        break;
+
+                    case "due_on":
+                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out dt))
+                            DueOn = dt;
+                        break;
+
+                    case "type":
+                        Type = reader.ReadElementContentAsString();
+                        break;
+
+                    case "origin":
+                        Origin = reader.ReadElementContentAsString();
                         break;
 
                     case "attempt_next_collection_at":
-                        DateTime d;
-                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out d))
-                            AttemptNextCollectionAt = d;
+                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out dt))
+                            AttemptNextCollectionAt = dt;
                         break;
 
                     case "recovery_reason":
@@ -418,6 +644,25 @@ namespace Recurly
                 xmlWriter.WriteElementString("collection_method", "automatic");
             }
            
+            xmlWriter.WriteEndElement(); // End: invoice
+        }
+
+        internal void WriteUpdateXml(XmlTextWriter xmlWriter)
+        {
+            xmlWriter.WriteStartElement("invoice"); // Start: invoice
+
+            Address.WriteXml(xmlWriter);
+            xmlWriter.WriteElementString("customer_notes", CustomerNotes);
+            xmlWriter.WriteElementString("terms_and_conditions", TermsAndConditions);
+            xmlWriter.WriteElementString("vat_reverse_charge_notes", VatReverseChargeNotes);
+            xmlWriter.WriteElementString("gateway_code", GatewayCode);
+            xmlWriter.WriteElementString("po_number", PoNumber);
+
+            if (NetTerms.HasValue && _netTermsChanged)
+            {
+                xmlWriter.WriteElementString("net_terms", NetTerms.Value.AsString());
+            }
+
             xmlWriter.WriteEndElement(); // End: invoice
         }
 
@@ -498,10 +743,17 @@ namespace Recurly
         /// <returns></returns>
         public static Invoice Get(string invoiceNumberWithPrefix)
         {
+            if (string.IsNullOrWhiteSpace(invoiceNumberWithPrefix))
+            {
+                return null;
+            }
+
             var invoice = new Invoice();
+
+            var escapedInvoiceNumber = Uri.EscapeDataString(invoiceNumberWithPrefix);
             
             var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Get,
-                Invoice.UrlPrefix + invoiceNumberWithPrefix,
+                Invoice.UrlPrefix + escapedInvoiceNumber,
                 invoice.ReadXml);
 
             return statusCode == HttpStatusCode.NotFound ? null : invoice;
@@ -516,6 +768,11 @@ namespace Recurly
         [Obsolete("Deprecated, please use the Create instance method on the Invoice object")] 
         public static Invoice Create(string accountCode)
         {
+            if (string.IsNullOrWhiteSpace(accountCode))
+            {
+                return null;
+            }
+
             var invoice = new Invoice();
 
             var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,

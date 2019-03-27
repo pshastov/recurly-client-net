@@ -84,7 +84,12 @@ namespace Recurly
         /// <summary>
         /// When the gift card was redeemed by the recipient.
         /// </summary>
-        public DateTime RedeemedAt { get; private set; }
+        public DateTime? RedeemedAt { get; private set; }
+
+        /// <summary>
+        /// When the gift card was canceled.
+        /// </summary>
+        public DateTime? CanceledAt { get; private set; }
 
         /// <summary>
         /// When the gift card was sent to the recipient by Recurly via email,
@@ -92,7 +97,47 @@ namespace Recurly
         /// This will be empty for post delivery or email delivery 
         /// where the email template was disabled.
         /// </summary>
-        public DateTime DeliveredAt { get; private set; }
+        public DateTime? DeliveredAt { get; private set; }
+
+        
+        private String _purchaseInvoiceId;
+        private Invoice _purchaseInvoice;
+
+        private String _redemptionInvoiceId;
+        private Invoice _redemptionInvoice;
+
+
+        /// <summary>
+        /// The charge invoice for the gift card purchase.
+        /// </summary>
+        public Invoice PurchaseInvoice
+        {
+            get
+            {
+                if (_purchaseInvoice == null && !_purchaseInvoiceId.IsNullOrEmpty())
+                {
+                    _purchaseInvoice = Invoices.Get(_purchaseInvoiceId);
+                }
+                return _purchaseInvoice;
+            }
+            set { _purchaseInvoice = value; }
+        }
+
+        /// <summary>
+        /// The credit invoice for the gift card redemption.
+        /// </summary>
+        public Invoice RedemptionInvoice
+        {
+            get
+            {
+                if (_redemptionInvoice == null && !_redemptionInvoiceId.IsNullOrEmpty())
+                {
+                    _redemptionInvoice = Invoices.Get(_redemptionInvoiceId);
+                }
+                return _redemptionInvoice;
+            }
+            set { _redemptionInvoice = value; }
+        }
 
         internal const string UrlPrefix = "/gift_cards/";
 
@@ -215,6 +260,22 @@ namespace Recurly
                             BalanceInCents = balance;
                         break;
 
+                    case "redemption_invoice":
+                        string redemptionUrl = reader.GetAttribute("href");
+                        if (redemptionUrl != null)
+                        {
+                            _redemptionInvoiceId = Uri.UnescapeDataString(redemptionUrl.Substring(redemptionUrl.LastIndexOf("/") + 1));
+                        }
+                        break;
+
+                    case "purchase_invoice":
+                        string purchaseUrl = reader.GetAttribute("href");
+                        if (purchaseUrl != null)
+                        {
+                            _purchaseInvoiceId = Uri.UnescapeDataString(purchaseUrl.Substring(purchaseUrl.LastIndexOf("/") + 1));
+                        }
+                        break;
+
                     case "gifter_account":
                         string href = reader.GetAttribute("href");
                         if (null != href)
@@ -244,6 +305,11 @@ namespace Recurly
                     case "redeemed_at":
                         if (DateTime.TryParse(reader.ReadElementContentAsString(), out dateVal))
                             RedeemedAt = dateVal;
+                        break;
+
+                    case "canceled_at":
+                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out dateVal))
+                            CanceledAt = dateVal;
                         break;
 
                     case "delivered_at":

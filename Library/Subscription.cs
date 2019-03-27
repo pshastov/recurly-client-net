@@ -16,23 +16,18 @@ namespace Recurly
         // The currently valid Subscription States
         public enum SubscriptionState : short
         {
-            All = 0,
-            Active = 1,
+            All      = 0,
+            Active   = 1,
             Canceled = 2,
-            Expired = 4,
-            Future = 8,
-            InTrial = 16,
-            Live = 32,
-            PastDue = 64,
-            Pending = 128,
-            Open    = 256,
-            Failed  = 512,
-        }
-
-        public enum ChangeTimeframe : short
-        {
-            Now,
-            Renewal
+            Expired  = 4,
+            Future   = 8,
+            InTrial  = 16,
+            Live     = 32,
+            PastDue  = 64,
+            Pending  = 128,
+            Open     = 256,
+            Failed   = 512,
+            Paused   = 1024
         }
 
         public enum RefundType : short
@@ -50,6 +45,8 @@ namespace Recurly
         private Address _address;
 
         private string _accountCode;
+        public string AccountCode => _accountCode;
+
         private Account _account;
         /// <summary>
         /// Account in Recurly
@@ -67,6 +64,8 @@ namespace Recurly
         {
             get { return _invoice ?? (_invoice = Invoices.Get(_invoiceNumber)); }
         }
+
+        public InvoiceCollection InvoiceCollection { get; private set; }
 
         private Plan _plan;
 
@@ -98,6 +97,16 @@ namespace Recurly
         }
 
         public long? ShippingAddressId { get; set; }
+
+        /// <summary>
+        /// List of custom fields
+        /// </summary>
+        public List<CustomField> CustomFields
+        {
+            get { return _customFields ?? (_customFields = new List<CustomField>()); }
+            set { _customFields = value; }
+        }
+        private List<CustomField> _customFields;
 
         public string Uuid { get; private set; }
 
@@ -194,7 +203,15 @@ namespace Recurly
         /// </summary>
         public Coupon Coupon
         {
-            get { return _coupon ?? (_coupon = Recurly.Coupons.Get(_couponCode)); }
+            get
+            {
+                if (string.IsNullOrWhiteSpace(_couponCode))
+                {
+                    return null;
+                }
+
+                return _coupon ?? (_coupon = Recurly.Coupons.Get(_couponCode));
+            }
             set
             {
                 _coupon = value;
@@ -249,7 +266,8 @@ namespace Recurly
         /// </summary>
         public Invoice InvoicePreview { get; private set; }
         public int? TotalBillingCycles { get; set; }
-        public int? RemainingBillingCycles { get; private set; }
+        public int? RemainingBillingCycles { get; set; }
+        public int? RemainingPauseCycles { get; private set; }
         public DateTime? FirstRenewalDate { get; set; }
 
         internal const string UrlPrefix = "/subscriptions/";
@@ -283,6 +301,8 @@ namespace Recurly
         public string CustomerNotes { get; set; }
         public string TermsAndConditions { get; set; }
         public string VatReverseChargeNotes { get; set; }
+        public string GatewayCode { get; set; }
+
         /// <summary>
         /// True if the subscription started from a gift card.
         /// </summary>
@@ -296,6 +316,45 @@ namespace Recurly
         /// Optionally set true to denote that this subscription was imported from a trial.
         /// </summary>
         public bool? ImportedTrial { get; set; }
+
+        /// <summary>
+        /// Determines whether subscriptions to this plan should auto-renew term at the end of the current term or expire.
+        /// Defaults to true.
+        /// </summary>
+        public bool? AutoRenew { get; set; }
+
+        /// <summary>
+        /// Determines the renewal subscription term.
+        /// Defaults to plans total billing cycles value unless
+        /// overwritten when creating the subscription or editing subscription. 
+        /// </summary>
+        public int? RenewalBillingCycles { get; set; }
+
+        /// <summary>
+        /// Previously named first_renewal_date. Forces the subscriptions next billing period start date.
+        /// Subsequent billing period start dates will be offset from this date.
+        /// The first invoice will be prorated appropriately so that the customer pays
+        /// for the portion of the first billing period for which the subscription applies. 
+        /// </summary>
+        public DateTime FirstBillDate { get; private set; }
+
+        /// <summary>
+        /// Previously named next_renewal_date. Specifies a future date that 
+        /// the subscriptions next billing period should be billed.
+        /// </summary>
+        public DateTime NextBillDate { get; private set; }
+
+        /// <summary>
+        /// Start date of the subscriptions current term. Will equal the future start
+        /// date if subscription was created in the future state.
+        /// </summary>
+        public DateTime CurrentTermStartedAt { get; private set; }
+
+        /// <summary>
+        /// End date of the subscriptions current term. Will be nil
+        /// if subscription has future start date.
+        /// </summary>
+        public DateTime CurrentTermEndsAt { get; private set; }
 
         public Adjustment.RevenueSchedule? RevenueScheduleType { get; set; }
 
@@ -358,29 +417,6 @@ namespace Recurly
                 ReadXml);
         }
 
-        /// <summary>
-        /// Request that an update to a subscription take place
-        /// </summary>
-        /// <param name="timeframe">when the update should occur: now (default) or at renewal</param>
-        public void ChangeSubscription(ChangeTimeframe timeframe)
-        {
-            Client.WriteXmlDelegate writeXmlDelegate;
-
-            if (ChangeTimeframe.Renewal == timeframe)
-                writeXmlDelegate = WriteChangeSubscriptionAtRenewalXml;
-            else
-                writeXmlDelegate = WriteChangeSubscriptionNowXml;
-
-            Client.Instance.PerformRequest(Client.HttpRequestMethod.Put,
-                UrlPrefix + Uri.EscapeDataString(Uuid),
-                writeXmlDelegate,
-                ReadXml);
-        }
-
-        public void ChangeSubscription()
-        {
-            ChangeSubscription(ChangeTimeframe.Now);
-        }
 
         /// <summary>
         /// Cancel an active subscription.  The subscription will not renew, but will continue to be active
@@ -417,8 +453,7 @@ namespace Recurly
         /// <summary>
         /// Transforms this object into a preview Subscription applied to the account.
         /// </summary>
-        /// <param name="timeframe">ChangeTimeframe.Now (default) or at Renewal</param>
-        public void Preview(ChangeTimeframe timeframe)
+        public void Preview()
         {
             if (_saved)
             {
@@ -434,44 +469,6 @@ namespace Recurly
             _saved = false;
         }
 
-        public void Preview()
-        {
-            Preview(ChangeTimeframe.Now);
-        }
-
-        /// <summary>
-        /// Preview the changes associated with the current subscription
-        /// </summary>
-        /// <param name="timeframe">ChangeTimeframe.Now (default) or at Renewal</param>
-        public virtual Subscription PreviewChange(ChangeTimeframe timeframe)
-        {
-            if (!_saved)
-            {
-                throw new Recurly.RecurlyException("Must have an existing subscription to preview changes.");
-            }
-
-            Client.WriteXmlDelegate writeXmlDelegate;
-
-            if (ChangeTimeframe.Renewal == timeframe)
-                writeXmlDelegate = WriteChangeSubscriptionAtRenewalXml;
-            else
-                writeXmlDelegate = WriteChangeSubscriptionNowXml;
-
-            var previewSubscription = new Subscription();
-
-            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,
-                UrlPrefix + Uri.EscapeDataString(Uuid) + "/preview",
-                writeXmlDelegate,
-                previewSubscription.ReadPreviewXml);
-
-            return statusCode == HttpStatusCode.NotFound ? null : previewSubscription;
-        }
-
-        public virtual Subscription PreviewChange()
-        {
-            return PreviewChange(ChangeTimeframe.Now);
-        }
-
         /// <summary>
         /// For an active subscription, this will pause the subscription until the specified date.
         /// </summary>
@@ -479,8 +476,26 @@ namespace Recurly
         /// <param name="bulk">bulk = false (default) or true to bypass the 60 second wait while postponing</param>
         public void Postpone(DateTime nextRenewalDate, bool bulk = false)
         {
+            var dateString = nextRenewalDate.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ");
+
             Client.Instance.PerformRequest(Client.HttpRequestMethod.Put,
-                UrlPrefix + Uri.EscapeDataString(Uuid) + "/postpone?next_renewal_date=" + nextRenewalDate.ToString("s") + "&bulk=" + bulk.ToString().ToLower(),
+                UrlPrefix + Uri.EscapeDataString(Uuid) + "/postpone?next_renewal_date=" + dateString + "&bulk=" + bulk.ToString().ToLower(),
+                ReadXml);
+        }
+
+        public void Pause(int remainingPauseCycles)
+        {
+            RemainingPauseCycles = remainingPauseCycles;
+            Client.Instance.PerformRequest(Client.HttpRequestMethod.Put,
+                UrlPrefix + Uri.EscapeDataString(Uuid) + "/pause",
+                WritePauseXml,
+                ReadXml);
+        }
+
+        public void Resume()
+        {
+            Client.Instance.PerformRequest(Client.HttpRequestMethod.Put,
+                UrlPrefix + Uri.EscapeDataString(Uuid) + "/resume",
                 ReadXml);
         }
 
@@ -490,10 +505,17 @@ namespace Recurly
                 UrlPrefix + Uri.EscapeDataString(Uuid) + "/notes",
                 WriteSubscriptionNotesXml(notes),
                 ReadXml);
+            if (notes.ContainsKey("CustomerNotes"))
+                CustomerNotes = notes["CustomerNotes"];
 
-            CustomerNotes = notes["CustomerNotes"];
-            TermsAndConditions = notes["TermsAndConditions"];
-            VatReverseChargeNotes = notes["VatReverseChargeNotes"];
+            if (notes.ContainsKey("TermsAndConditions"))
+                TermsAndConditions = notes["TermsAndConditions"];
+
+            if (notes.ContainsKey("VatReverseChargeNotes"))
+                VatReverseChargeNotes = notes["VatReverseChargeNotes"];
+
+            if (notes.ContainsKey("GatewayCode"))
+                GatewayCode = notes["GatewayCode"];
 
             return true;
         }
@@ -506,6 +528,55 @@ namespace Recurly
                 coupons.ReadXmlList);
 
             return statusCode == HttpStatusCode.NotFound ? null : coupons;
+        }
+
+        /// <summary>
+        /// Request that an update to a subscription take place
+        /// </summary>
+        /// <param name="uuid">The uuid of the subscription to be changed</param>
+        /// <param name="change">A subscription change object listing what to change about the subscription</param>
+        public static Subscription ChangeSubscription(String uuid, SubscriptionChange change)
+        {
+            if (uuid.IsNullOrEmpty())
+            {
+                throw new ArgumentException("uuid cannot be null or empty");
+            }
+
+            if (change == null)
+            {
+                throw new ArgumentException("change cannot be null or empty");
+            }
+
+            var subscription = new Subscription();
+
+            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Put,
+                UrlPrefix + Uri.EscapeDataString(uuid),
+                change.WriteChangeSubscriptionXml,
+                subscription.ReadXml);
+
+            return statusCode == HttpStatusCode.NotFound ? null : subscription;
+        }
+
+        /// <summary>
+        /// Preview the changes associated with the current subscription
+        /// </summary>
+        /// <param name="uuid">The uuid of the subscription to be changed</param>
+        /// <param name="change">A subscription change object listing what to change about the subscription</param>
+        public static Subscription PreviewChange(String uuid, SubscriptionChange change)
+        {
+            if (uuid.IsNullOrEmpty())
+            {
+                throw new Recurly.RecurlyException("Must have an existing subscription to preview changes.");
+            }
+
+            var previewSubscription = new Subscription();
+
+            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,
+                UrlPrefix + Uri.EscapeDataString(uuid) + "/preview",
+                change.WriteChangeSubscriptionXml,
+                previewSubscription.ReadPreviewXml);
+
+            return statusCode == HttpStatusCode.NotFound ? null : previewSubscription;
         }
 
         #region Read and Write XML documents
@@ -549,6 +620,7 @@ namespace Recurly
 
                 DateTime dateVal;
                 Int32 billingCycles;
+                Int32 pauseCycles;
 
                 switch (reader.Name)
                 {
@@ -633,12 +705,30 @@ namespace Recurly
                         AddOns.ReadXml(reader);
                         break;
 
+                    case "custom_fields":
+                        CustomFields = new List<CustomField>();
+                        while (reader.Read())
+                        {
+                            if (reader.Name == "custom_fields" && reader.NodeType == XmlNodeType.EndElement)
+                                break;
+
+                            if (reader.NodeType == XmlNodeType.Element && reader.Name == "custom_field")
+                            {
+                                CustomFields.Add(new CustomField(reader));
+                            }
+                        }
+                        break;
+
                     case "invoice":
                         href = reader.GetAttribute("href");
                         if (!href.IsNullOrEmpty())
                             _invoiceNumber = Uri.UnescapeDataString(href.Substring(href.LastIndexOf("/") + 1));
                         else
                             InvoicePreview = new Invoice(reader);
+                        break;
+
+                    case "invoice_collection":
+                        InvoiceCollection = new InvoiceCollection(reader);
                         break;
 
                     case "pending_subscription":
@@ -669,6 +759,11 @@ namespace Recurly
                             RemainingBillingCycles = billingCycles;
                         break;
 
+                    case "remaining_pause_cycles":
+                        if (Int32.TryParse(reader.ReadElementContentAsString(), out pauseCycles))
+                            RemainingPauseCycles = pauseCycles;
+                        break;
+
                     case "tax_in_cents":
                         TaxInCents = reader.ReadElementContentAsInt();
                         break;
@@ -693,12 +788,18 @@ namespace Recurly
                         VatReverseChargeNotes = reader.ReadElementContentAsString();
                         break;
 
+                    case "gateway_code":
+                        GatewayCode = reader.ReadElementContentAsString();
+                        break;
+
                     case "address":
                         Address = new Address(reader);
                         break;
+
                     case "started_with_gift":
                         StartedWithGiftCard = reader.ReadElementContentAsBoolean();
                         break;
+
                     case "converted_at":
                         DateTime date;
                         if (DateTime.TryParse(reader.ReadElementContentAsString(), out date))
@@ -706,9 +807,11 @@ namespace Recurly
                             ConvertedAt = date;
                         }
                         break;
+
                     case "no_billing_info_reason":
                         NoBillingInfoReason = reader.ReadElementContentAsString();
                         break;
+
                     case "imported_trial":
                         ImportedTrial = reader.ReadElementContentAsBoolean();
                         break;
@@ -717,6 +820,38 @@ namespace Recurly
                         var revenueScheduleType = reader.ReadElementContentAsString();
                         if (!revenueScheduleType.IsNullOrEmpty())
                             RevenueScheduleType = revenueScheduleType.ParseAsEnum<Adjustment.RevenueSchedule>();
+                        break;
+
+                    case "auto_renew":
+                        bool b;
+                        if (bool.TryParse(reader.ReadElementContentAsString(), out b))
+                            AutoRenew = b;
+                        break;
+
+                    case "renewal_billing_cycles":
+                        int i;
+                        if (int.TryParse(reader.ReadElementContentAsString(), out i))
+                            RenewalBillingCycles = i;
+                        break;
+
+                    case "current_term_started_at":
+                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out dateVal))
+                            CurrentTermStartedAt = dateVal;
+                        break;
+
+                    case "current_term_ends_at":
+                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out dateVal))
+                            CurrentTermEndsAt = dateVal;
+                        break;
+
+                    case "first_bill_date":
+                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out dateVal))
+                            FirstBillDate = dateVal;
+                        break;
+
+                    case "next_bill_date":
+                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out dateVal))
+                            NextBillDate = dateVal;
                         break;
                 }
             }
@@ -758,6 +893,13 @@ namespace Recurly
             }
         }
 
+        internal void WritePauseXml(XmlTextWriter xmlWriter)
+        {
+            xmlWriter.WriteStartElement("subscription"); // Start: subscription
+            xmlWriter.WriteElementString("remaining_pause_cycles", RemainingPauseCycles.Value.AsString());
+            xmlWriter.WriteEndElement();
+        }
+
         internal void WriteSubscriptionXml(XmlTextWriter xmlWriter)
         {
             WriteSubscriptionXml(xmlWriter, false);
@@ -767,7 +909,6 @@ namespace Recurly
         {
             WriteSubscriptionXml(xmlWriter, true);
         }
-
 
         internal void WriteSubscriptionXml(XmlTextWriter xmlWriter, bool embedded)
         {
@@ -845,50 +986,16 @@ namespace Recurly
             if (RevenueScheduleType.HasValue)
                 xmlWriter.WriteElementString("revenue_schedule_type", RevenueScheduleType.Value.ToString().EnumNameToTransportCase());
 
-            xmlWriter.WriteEndElement(); // End: subscription
-        }
+            if (RemainingBillingCycles.HasValue)
+                xmlWriter.WriteElementString("remaining_billing_cycles", RemainingBillingCycles.Value.AsString());
 
-        protected void WriteChangeSubscriptionNowXml(XmlTextWriter xmlWriter)
-        {
-            WriteChangeSubscriptionXml(xmlWriter, ChangeTimeframe.Now);
-        }
+            if (AutoRenew.HasValue)
+                xmlWriter.WriteElementString("auto_renew", AutoRenew.Value.AsString());
 
-        protected void WriteChangeSubscriptionAtRenewalXml(XmlTextWriter xmlWriter)
-        {
-            WriteChangeSubscriptionXml(xmlWriter, ChangeTimeframe.Renewal);
-        }
+            if (RenewalBillingCycles.HasValue)
+                xmlWriter.WriteElementString("renewal_billing_cycles", RenewalBillingCycles.Value.AsString());
 
-        protected void WriteChangeSubscriptionXml(XmlTextWriter xmlWriter, ChangeTimeframe timeframe)
-        {
-            xmlWriter.WriteStartElement("subscription"); // Start: subscription
-
-            xmlWriter.WriteElementString("timeframe", timeframe.ToString().EnumNameToTransportCase());
-            xmlWriter.WriteElementString("quantity", Quantity.AsString());
-            xmlWriter.WriteStringIfValid("plan_code", PlanCode);
-            xmlWriter.WriteIfCollectionHasAny("subscription_add_ons", AddOns);
-            xmlWriter.WriteStringIfValid("coupon_code", _couponCode);
-
-            if (_couponCodes != null && _couponCodes.Length != 0) {
-                xmlWriter.WriteStartElement("coupon_codes");
-                foreach (var _coupon_code in _couponCodes)
-                {
-                    xmlWriter.WriteElementString("coupon_code", _coupon_code);
-                }
-                xmlWriter.WriteEndElement();
-            }
-
-
-            if (UnitAmountInCents.HasValue)
-                xmlWriter.WriteElementString("unit_amount_in_cents", UnitAmountInCents.Value.AsString());
-
-            if (CollectionMethod.Like("manual"))
-            {
-                xmlWriter.WriteElementString("collection_method", "manual");
-                xmlWriter.WriteElementString("net_terms", NetTerms.Value.AsString());
-                xmlWriter.WriteElementString("po_number", PoNumber);
-            }
-            else if (CollectionMethod.Like("automatic"))
-                xmlWriter.WriteElementString("collection_method", "automatic");
+            xmlWriter.WriteIfCollectionHasAny("custom_fields", CustomFields);
 
             xmlWriter.WriteEndElement(); // End: subscription
         }
@@ -899,9 +1006,19 @@ namespace Recurly
             {
                 xmlWriter.WriteStartElement("subscription"); // Start: subscription
 
-                xmlWriter.WriteElementString("customer_notes", notes["CustomerNotes"]);
-                xmlWriter.WriteElementString("terms_and_conditions", notes["TermsAndConditions"]);
-                xmlWriter.WriteElementString("vat_reverse_charge_notes", notes["VatReverseChargeNotes"]);
+                if (notes.ContainsKey("CustomerNotes"))
+                    xmlWriter.WriteElementString("customer_notes", notes["CustomerNotes"]);
+
+                if (notes.ContainsKey("TermsAndConditions"))
+                    xmlWriter.WriteElementString("terms_and_conditions", notes["TermsAndConditions"]);
+
+                if (notes.ContainsKey("VatReverseChargeNotes"))
+                    xmlWriter.WriteElementString("vat_reverse_charge_notes", notes["VatReverseChargeNotes"]);
+
+                if (notes.ContainsKey("GatewayCode"))
+                    xmlWriter.WriteElementString("gateway_code", notes["GatewayCode"]);
+
+                xmlWriter.WriteIfCollectionHasAny("custom_fields", CustomFields);
 
                 xmlWriter.WriteEndElement(); // End: subscription
             };
@@ -968,6 +1085,11 @@ namespace Recurly
 
         public static Subscription Get(string uuid)
         {
+            if (string.IsNullOrWhiteSpace(uuid))
+            {
+                return null;
+            }
+
             var s = new Subscription();
             var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Get,
                 Subscription.UrlPrefix + Uri.EscapeDataString(uuid),

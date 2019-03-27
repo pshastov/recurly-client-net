@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Net;
@@ -16,7 +16,7 @@ namespace Recurly
             AmericanExpress,
             Discover,
             JCB,
-            Danokrt,
+            Dankort,
             Maestro,
             Forbrugsforeningen,
             Laser,
@@ -102,6 +102,11 @@ namespace Recurly
         /// </summary>
         public string AmazonBillingAgreementId { get; set; }
 
+        /// <summary>
+        /// Amazon Region
+        /// </summary>
+        public string AmazonRegion { get; set; }
+
         private string _cardNumber;
 
         /// <summary>
@@ -133,6 +138,10 @@ namespace Recurly
 
         public string TokenId { get; set; }
 
+        public string GatewayToken { get; set; }
+
+        public string GatewayCode { get; set; }
+
         /// <summary>
         /// Timestamp representing the last update of this billing info
         /// </summary>
@@ -157,6 +166,11 @@ namespace Recurly
             AccountCode = account.AccountCode;
         }
 
+        internal BillingInfo(XmlTextReader reader)
+        {
+            ReadXml(reader);
+        }
+
         private BillingInfo()
         {
         }
@@ -168,6 +182,11 @@ namespace Recurly
         /// <returns></returns>
         public static BillingInfo Get(string accountCode)
         {
+            if (string.IsNullOrWhiteSpace(accountCode))
+            {
+                return null;
+            }
+
             var billingInfo = new BillingInfo();
 
             var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Get,
@@ -213,6 +232,10 @@ namespace Recurly
 
                 switch (reader.Name)
                 {
+                    case "billing_info":
+                        // The element's opening tag - nothing to do
+                        break;
+
                     case "account":
                         var href = reader.GetAttribute("href");
                         AccountCode = Uri.UnescapeDataString(href.Substring(href.LastIndexOf("/") + 1));
@@ -275,17 +298,23 @@ namespace Recurly
                         break;
 
                     case "card_type":
-                        CardType = reader.ReadElementContentAsString().ParseAsEnum<CreditCardType>();
+                        var type = reader.ReadElementContentAsString();
+                        if (!type.IsNullOrEmpty())
+                            CardType = type.ParseAsEnum<CreditCardType>();
                         break;
 
                     case "year":
-                        ExpirationYear = reader.ReadElementContentAsInt();
+                        int y;
+                        if (int.TryParse(reader.ReadElementContentAsString(), out y))
+                            ExpirationYear = y;
                         break;
 
                     case "month":
-                        ExpirationMonth = reader.ReadElementContentAsInt();
+                        int m;
+                        if (int.TryParse(reader.ReadElementContentAsString(), out m))
+                            ExpirationMonth = m;
                         break;
-
+                        
                     case "first_six":
                         FirstSix = reader.ReadElementContentAsString();
                         break;
@@ -300,6 +329,10 @@ namespace Recurly
 
                     case "amazon_billing_agreement_id":
                         AmazonBillingAgreementId = reader.ReadElementContentAsString();
+                        break;
+
+                    case "amazon_region":
+                        AmazonRegion = reader.ReadElementContentAsString();
                         break;
 
                     case "routing_number":
@@ -321,6 +354,10 @@ namespace Recurly
                             UpdatedAt = d;
                         }
                         break;
+
+                    default:
+                        Debug.WriteLine("Recurly Client Library: Unexpected XML field in response - " + reader.Name);
+                        break;
                 }
             }
         }
@@ -334,6 +371,7 @@ namespace Recurly
             {
                 xmlWriter.WriteStringIfValid("first_name", FirstName);
                 xmlWriter.WriteStringIfValid("last_name", LastName);
+                xmlWriter.WriteStringIfValid("company", Company);
                 xmlWriter.WriteStringIfValid("name_on_account", NameOnAccount);
                 xmlWriter.WriteStringIfValid("address1", Address1);
                 xmlWriter.WriteStringIfValid("address2", Address2);
@@ -376,10 +414,29 @@ namespace Recurly
                     xmlWriter.WriteElementString("amazon_billing_agreement_id", AmazonBillingAgreementId);
                 }
 
+                if (!AmazonRegion.IsNullOrEmpty())
+                {
+                    xmlWriter.WriteElementString("amazon_region", AmazonRegion);
+                }
+
                 if (ExternalHppType.HasValue)
                 {
                     xmlWriter.WriteElementString("external_hpp_type", ExternalHppType.Value.ToString().EnumNameToTransportCase());
 
+                }
+
+                if (!GatewayCode.IsNullOrEmpty())
+                {
+                    xmlWriter.WriteElementString("gateway_code", GatewayCode);
+                    xmlWriter.WriteElementString("gateway_token", GatewayToken);
+
+                    // EnumNameToTransportCase() turns MasterCard into "master_card",
+                    // but it needs to be "master" for the server to accept it.
+                    // Check for this edge case before writing the card_type tag.
+                    var card = CardType.ToString().EnumNameToTransportCase();
+                    if (card == "master_card") card = "master";
+
+                    xmlWriter.WriteElementString("card_type", card);
                 }
             }
 

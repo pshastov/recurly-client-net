@@ -28,17 +28,18 @@ namespace Recurly
         protected Client(Settings settings)
         {
             Settings = settings;
-
-            // SecurityProtocolType values below not available in Mono < 4.3
-            const int SecurityProtocolTypeTls11 = 768;
-            const int SecurityProtocolTypeTls12 = 3072;
-
-            ServicePointManager.SecurityProtocol |= (SecurityProtocolType)(SecurityProtocolTypeTls12 | SecurityProtocolTypeTls11); 
         }
 
         internal static void ChangeInstance(Client client)
         {
             _instance = client;
+        }
+
+        internal static XmlTextReader BuildXmlTextReader(Stream stream)
+        {
+            var reader = new XmlTextReader(stream);
+            reader.DtdProcessing = DtdProcessing.Prohibit;
+            return reader;
         }
 
         internal void ApplySettings(Settings settings)
@@ -134,6 +135,11 @@ namespace Recurly
             Console.WriteLine("Requesting " + method + " " + url);
 #endif
             var request = (HttpWebRequest)WebRequest.Create(url);
+
+            if (!request.RequestUri.Host.EndsWith(Settings.ValidDomain)) {
+                throw new RecurlyException("Domain " + request.RequestUri.Host + " is not a valid Recurly domain");
+            }
+
             request.Accept = "application/xml";      // Tells the server to return XML instead of HTML
             request.ContentType = "application/xml; charset=utf-8"; // The request is an XML document
             request.SendChunked = false;             // Send it all as one request
@@ -142,7 +148,7 @@ namespace Recurly
             request.Headers.Add("X-Api-Version", Settings.RecurlyApiVersion);
             request.Method = method.ToString().ToUpper();
 
-            Debug.WriteLine(String.Format("Recurly: Requesting {0} {1}", request.Method, request.RequestUri));
+            Console.WriteLine(String.Format("Recurly: Requesting {0} {1}", request.Method, request.RequestUri));
 
             if ((method == HttpRequestMethod.Post || method == HttpRequestMethod.Put) && (writeXmlDelegate != null))
             {
@@ -178,7 +184,7 @@ namespace Recurly
                 var statusCode = response.StatusCode;
                 Errors errors;
 
-                Debug.WriteLine(String.Format("Recurly Library Received: {0} - {1}", (int)statusCode, statusCode));
+                Console.WriteLine(String.Format("Recurly Library Received: {0} - {1}", (int)statusCode, statusCode));
 
                 switch (response.StatusCode)
                 {
@@ -217,8 +223,8 @@ namespace Recurly
                 if ((int)statusCode == ValidationException.HttpStatusCode) // Unprocessable Entity
                 {
                     errors = Errors.ReadResponseAndParseErrors(response);
-                    if (errors.ValidationErrors.HasAny()) Debug.WriteLine(errors.ValidationErrors[0].ToString());
-                    else Debug.WriteLine("Client Error: " + response.ToString());
+                    if (errors.ValidationErrors.HasAny()) Console.WriteLine(errors.ValidationErrors[0].ToString());
+                    else Console.WriteLine("Client Error: " + response.ToString());
                     throw new ValidationException(errors);
                 }
 
@@ -246,7 +252,7 @@ namespace Recurly
             request.Method = "GET";
             request.Headers.Add("Accept-Language", acceptLanguage);
 
-            Debug.WriteLine(String.Format("Recurly: Requesting {0} {1}", request.Method, request.RequestUri));
+            Console.WriteLine(String.Format("Recurly: Requesting {0} {1}", request.Method, request.RequestUri));
 
             try
             {
@@ -276,7 +282,7 @@ namespace Recurly
                 var statusCode = response.StatusCode;
                 Errors errors;
 
-                Debug.WriteLine(String.Format("Recurly Library Received: {0} - {1}", (int)statusCode, statusCode));
+                Console.WriteLine(String.Format("Recurly Library Received: {0} - {1}", (int)statusCode, statusCode));
 
                 switch (response.StatusCode)
                 {
@@ -325,12 +331,12 @@ namespace Recurly
         {
             if (readXmlDelegate == null && readXmlListDelegate == null && responseDelegate == null) return;
 #if (DEBUG)
-            Debug.WriteLine("Got Response:");
-            Debug.WriteLine("Status code: " + response.StatusCode);
+            Console.WriteLine("Got Response:");
+            Console.WriteLine("Status code: " + response.StatusCode);
 
             foreach (var header in response.Headers)
             {
-                Debug.WriteLine(header + ": " + response.Headers[header.ToString()]);
+                Console.WriteLine(header + ": " + response.Headers[header.ToString()]);
             }
 #endif
             var responseStream = CopyAndClose(response.GetResponseStream());
@@ -340,7 +346,7 @@ namespace Recurly
             string line;
             while ((line = reader.ReadLine()) != null)
             {
-                Debug.WriteLine(line);
+                Console.WriteLine(line);
             }
 #endif
             if (responseDelegate != null)
@@ -350,8 +356,9 @@ namespace Recurly
             }
 
             responseStream.Position = 0;
-            using (var xmlReader = new XmlTextReader(responseStream))
+            using (var xmlReader = Client.BuildXmlTextReader(responseStream))
             {
+
                 // Check for pagination
                 var cursor = string.Empty;
                 string start = null;

@@ -9,7 +9,7 @@ namespace Recurly.Test
     public class SubscriptionTest : BaseTest
     {
         [RecurlyFact(TestEnvironment.Type.Integration)]
-        public void LookupSubscription()
+        public Subscription LookupSubscription()
         {
             var plan = new Plan(GetMockPlanCode(), GetMockPlanName()) { Description = "Lookup Subscription Test" };
             plan.UnitAmountInCents.Add("USD", 1500);
@@ -27,6 +27,14 @@ namespace Recurly.Test
             var fromService = Subscriptions.Get(sub.Uuid);
 
             fromService.Should().Be(sub);
+            return sub;
+        }
+
+        [RecurlyFact(TestEnvironment.Type.Integration)]
+        public void LookupSubscriptionWithNullCouponCode()
+        {
+            var sub = LookupSubscription();
+            Assert.Equal(null, sub.Coupon);
         }
 
         [RecurlyFact(TestEnvironment.Type.Integration)]
@@ -44,9 +52,14 @@ namespace Recurly.Test
 
             var sub = new Subscription(account, plan, "USD");
             sub.Create();
-            sub.UnitAmountInCents = 3000;
 
-            sub.ChangeSubscription(Subscription.ChangeTimeframe.Renewal);
+            var subChange = new SubscriptionChange()
+            {
+                UnitAmountInCents = 3000,
+                TimeFrame = SubscriptionChange.ChangeTimeframe.Renewal
+            };
+
+            Subscription.ChangeSubscription(sub.Uuid, subChange);
 
             var newSubscription = Subscriptions.Get(sub.Uuid);
             newSubscription.PendingSubscription.Should().NotBeNull();
@@ -64,10 +77,10 @@ namespace Recurly.Test
             plan.Create();
             PlansToDeactivateOnDispose.Add(plan);
 
-            var account = CreateNewAccountWithBillingInfo();
-
+            var account = CreateNewAccountWithBillingInfo();            
             var coup = CreateNewCoupon(3);
             var sub = new Subscription(account, plan, "USD");
+            sub.CustomFields.Add(new CustomField("food", "taco"));
             sub.TotalBillingCycles = 5;
             sub.Coupon = coup;
             Assert.Null(sub.TaxInCents);
@@ -81,11 +94,12 @@ namespace Recurly.Test
             Assert.Equal(coup.CouponCode, sub.Coupon.CouponCode);
             Assert.Equal(9, sub.TaxInCents.Value);
             Assert.Equal("usst", sub.TaxType);
-            Assert.Equal(0.0875M, sub.TaxRate.Value);
+            Assert.Equal(0.085M, sub.TaxRate.Value);
 
             var sub1 = Subscriptions.Get(sub.Uuid);
             Assert.Equal(5, sub1.TotalBillingCycles);
-
+            Assert.Equal(sub1.CustomFields.First().Name, "food");
+            Assert.Equal(sub1.CustomFields.First().Value, "taco");
         }
 
         [RecurlyFact(TestEnvironment.Type.Integration)]
@@ -230,9 +244,13 @@ namespace Recurly.Test
 
             var sub = new Subscription(account, plan, "USD");
             sub.Create();
-            sub.Plan = plan2;
 
-            sub.ChangeSubscription(); // change "Now" is default
+            var subChange = new SubscriptionChange()
+            {
+                PlanCode = plan2.PlanCode
+            };
+
+            Subscription.ChangeSubscription(sub.Uuid, subChange);
 
             var newSubscription = Subscriptions.Get(sub.Uuid);
 
@@ -367,7 +385,7 @@ namespace Recurly.Test
             sub.Postpone(renewal);
 
             var diff = renewal.Date.Subtract(sub.CurrentPeriodEndsAt.Value.Date).Days;
-            diff.Should().Be(1);
+            diff.Should().Be(0);
         }
 
         [RecurlyFact(TestEnvironment.Type.Integration)]
@@ -391,12 +409,17 @@ namespace Recurly.Test
             notes.Add("CustomerNotes", "New Customer Notes");
             notes.Add("TermsAndConditions", "New T and C");
             notes.Add("VatReverseChargeNotes", "New VAT Notes");
+            notes.Add("GatewayCode", "jhq4mlfe7wtw");
+            sub.CustomFields.Add(new CustomField("food", "taco"));
 
             sub.UpdateNotes(notes);
 
             sub.CustomerNotes.Should().Be(notes["CustomerNotes"]);
             sub.TermsAndConditions.Should().Be(notes["TermsAndConditions"]);
             sub.VatReverseChargeNotes.Should().Be(notes["VatReverseChargeNotes"]);
+            sub.GatewayCode.Should().Be(notes["GatewayCode"]);
+            sub.CustomFields.Should().Contain(cf => cf.Name == "food");
+            sub.CustomFields.Should().Contain(cf => cf.Value == "taco");
 
         }
 
@@ -410,7 +433,7 @@ namespace Recurly.Test
             Account account = null;
             Subscription sub = null;
             Subscription sub2 = null;
-            Subscription sub3 = null;
+            SubscriptionChange subChange = null;
 
             try
             {
@@ -464,22 +487,25 @@ namespace Recurly.Test
 
                 // test changing the plan of a subscription
 
-                sub2 = Subscriptions.Get(sub.Uuid);
-                sub2.UnitAmountInCents = plan2.UnitAmountInCents["USD"];
-                sub2.Plan = plan2;
+                subChange = new SubscriptionChange()
+                {
+                    UnitAmountInCents = plan2.UnitAmountInCents["USD"],
+                    PlanCode = plan2.PlanCode,
+                    AddOns = sub.AddOns
+                };
 
-                foreach (var addOn in sub2.AddOns)
+                foreach (var addOn in subChange.AddOns)
                 {
                     addOn.UnitAmountInCents = plan2.UnitAmountInCents["USD"];
                 }
 
-                sub2.ChangeSubscription(Subscription.ChangeTimeframe.Now);
+                Subscription.ChangeSubscription(sub.Uuid, subChange);
 
                 // check if the changes were saved
-                sub3 = Subscriptions.Get(sub2.Uuid);
-                sub3.UnitAmountInCents.Should().Equals(plan2.UnitAmountInCents["USD"]);
-                Assert.Equal(1, sub3.AddOns.Count);
-                foreach (var addOn in sub3.AddOns)
+                sub2 = Subscriptions.Get(sub.Uuid);
+                sub2.UnitAmountInCents.Should().Equals(plan2.UnitAmountInCents["USD"]);
+                Assert.Equal(1, sub2.AddOns.Count);
+                foreach (var addOn in sub2.AddOns)
                 {
                     addOn.UnitAmountInCents.Should().Equals(plan2.UnitAmountInCents["USD"]);
                 }
@@ -592,7 +618,7 @@ namespace Recurly.Test
                     if (plan != null) plan.Deactivate();
                     if (account != null) account.Close();
                 }
-                catch (RecurlyException e) { }
+                catch (RecurlyException) { }
             }
         }
 

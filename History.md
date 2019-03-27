@@ -1,6 +1,254 @@
 Unreleased
 ===============
 
+1.15.4 (stable) / 2019-03-19
+===============
+
+* Fix XML for GiftCard Personal Message [PR](https://github.com/recurly/recurly-client-net/pull/386)
+
+1.15.3 (stable) / 2019-03-12
+===============
+
+This release brings us up to API version 2.19. There are no breaking changes.
+
+* Add support for Account Hierarchy [PR](https://github.com/recurly/recurly-client-net/pull/367)
+* Fix issues with AddOns in Subscription Change [PR](https://github.com/recurly/recurly-client-net/pull/381)
+
+1.15.2 (stable) / 2019-02-19
+===============
+
+This release brings us up to API version 2.18
+
+* Add support for Amazon Region [PR](https://github.com/recurly/recurly-client-net/pull/369)
+
+1.15.1 (stable) / 2019-02-07
+===============
+
+* Fix bug when SubscriptionAddOn.UsagePercentage is null [PR](https://github.com/recurly/recurly-client-net/pull/376)
+
+1.15.0 (stable) / 2019-02-05
+===============
+
+Note: this release contains a bug in SubscriptionAddoOn. Please use version 1.15.1 or higher instead.
+
+* Bug fixes [PR](https://github.com/recurly/recurly-client-net/pull/368)
+* Remove broken test [PR](https://github.com/recurly/recurly-client-net/pull/365)
+* Add SubscriptionChange class [PR](https://github.com/recurly/recurly-client-net/pull/363)
+* Update the User Agent [PR](https://github.com/recurly/recurly-client-net/pull/361)
+* Add TransactionError property to Transaction class [PR](https://github.com/recurly/recurly-client-net/pull/372)
+
+### Upgrade Notes
+This release contains two breaking changes:
+
+#### 1. Subscription Change Objects
+To update a subscription, a SubscriptionChange object must be passed into the `ChangeSubscription()` method.
+See the C# example in our [dev docs](https://dev.recurly.com/docs/update-subscription).
+
+#### 2. Address requires empty string to clear values
+In the past, if you were to leave a value such as `FirstName` null, it would nullify it via the API.
+Now, you must explicitly nullify it by setting it to empty string `""`. See [this conversation](https://github.com/recurly/recurly-client-net/pull/368#discussion_r246890848) for an example.
+
+1.14.1 (stable) / 2018-12-11
+===============
+
+This release brings us up to API version 2.17
+
+* Add public constructors to error classes [PR](https://github.com/recurly/recurly-client-net/pull/350)
+* Add missing values to WriteSubscriptionXml() [PR](https://github.com/recurly/recurly-client-net/pull/352)
+* Add `GatewayCode` to Subscription for notes and Invoice [PR](https://github.com/recurly/recurly-client-net/pull/355)
+* Add `ExemptionCertificate` attribute to Account [PR](https://github.com/recurly/recurly-client-net/pull/356)
+* Remove examples.md [PR](https://github.com/recurly/recurly-client-net/pull/357)
+* Add Custom Fields to WriteSubscriptionXml() [PR](https://github.com/recurly/recurly-client-net/pull/358)
+* Add EnterOfflinePayment method to Invoice [PR](https://github.com/recurly/recurly-client-net/pull/359)
+* Add methods for working with Shipping Addresses [PR](https://github.com/recurly/recurly-client-net/pull/360)
+* Make UTC explicit in Subscription.Postpone [PR](https://github.com/recurly/recurly-client-net/pull/362)
+
+1.14.0 (stable) / 2018-10-30
+===============
+
+* Made Gift Card RedeemedAt, DeliveredAt and CanceledAt nullable [PR](https://github.com/recurly/recurly-client-net/pull/343)
+* Change Usage dates to UTC [PR](https://github.com/recurly/recurly-client-net/pull/345)
+* Standardize line endings [PR](https://github.com/recurly/recurly-client-net/pull/346)
+* Changed Invoice Refunds for Credit Memo API changes [PR](https://github.com/recurly/recurly-client-net/pull/347)
+* Fixed tests based on credit memo changes [PR](https://github.com/recurly/recurly-client-net/pull/349)
+
+### Upgrade Notes
+
+This release brings us up to API version 2.16.
+The properties RedeemedAt and DeliveredAt of the GiftCard class are now nullable.
+
+1.13.1 (stable) / 2018-09-25
+===============
+
+* Added clean and release scripts [PR](https://github.com/recurly/recurly-client-net/pull/336)
+* Updated README with config and .Net target instructions [PR](https://github.com/recurly/recurly-client-net/pull/337)
+* Fixed release script [PR](https://github.com/recurly/recurly-client-net/pull/339)
+* Escape user supplied input [commit](https://github.com/recurly/recurly-client-net/commit/7a516e77c43f6993bc8b4d62a21336eed6e6bd6c)
+* Check for empty and null strings [commit](https://github.com/recurly/recurly-client-net/commit/3823d7a0b0d68e6f7877eaca7bc87f784fc105ce)
+* Fix compiler warnings [PR](https://github.com/recurly/recurly-client-net/pull/341)
+
+1.13.0 (stable) / 2018-09-11
+===============
+
+* Allow updating custom fields through /notes endpoint
+* Add ability to update an invoice
+* Remove reference to unused ruleset
+* Upgrade .NET 4.7 and scripts folder
+* Allow test script to run a single method
+* Fix integration tests so they all pass
+
+### Upgrade Notes
+
+This release brings us up to API version 2.14. The build now targets .NET v4.7.
+Please make sure that you update your application appropriately.
+
+1.12.5 (stable) / 2018-07-30
+===============
+
+* Upgrade mono to fix TLS issue 
+* 2.13 Custom Fields Support
+* Add PoNumber to Purchases Serializer
+
+1.12.4 (stable) / 2018-07-06
+===============
+
+* Allow nulls in BillingInfo
+
+1.12.3 (stable) / 2018-06-26
+===============
+
+Fixes a regression issue introduced in 1.12.1
+
+* Issue parsing Account#billing_info
+
+1.12.2 (stable) / 2018-06-26
+===============
+
+This release brings us to API version 2.13 but does not have any breaking changes.
+
+* Allow programmer to set gateway code per purchase
+* Add link to all_transactions on Invoice
+* Subscription Terms
+* Subscription.Coupon throws an ArgumentNullException if couponCode is null. Now returns null.
+
+1.12.1 (stable) / 2018-06-22
+===============
+
+* Fix Usages Id parsing bug
+* Transaction should parse embedded account
+* Make Subscription#RemainingBillingCycles writeable
+* Use EnumTransportCase for RefundMethod
+
+1.12.0 (stable) / 2018-05-29
+===============
+
+* Fix unit amount in cents for usage add ons
+* Expose subs accountcode to avoid unnecessary api requests
+
+###Upgrade Notes
+
+SubscriptionAddOn#UnitAmountInCents was changed to nullable type. If you do not read this value, no change is needed.
+
+
+1.11.4 (stable) / 2018-05-16
+===============
+
+* API v2.12 changes
+
+1.11.2 (stable) / 2018-04-03
+===============
+
+* Fix typo in Subscription#Pause
+
+1.11.1 (stable) / 2018-04-02
+===============
+
+* Add missing RevenueScheduleType values
+* API v2.11 Changes
+* Fix InvoiceCollection#credit_invoices parsing
+
+
+1.11.0 (stable) / 2018-03-11
+===============
+
+- API v2.10 changes
+
+### Upgrade Notes
+
+This version brings us up to API version 2.10. There are quite a few breaking changes:
+
+#### 1. InvoiceCollection
+
+When creating or failing invoices, we now return an InvoiceCollection object rather than an Invoice. If you wish to upgrade your application without changing functionality, we recommend that you use the `ChargeInvoice` property on the InvoiceCollection to get the charge Invoice. Example:
+
+```csharp
+// Change this:
+var invoice = account.InvoicePendingCharges();
+
+// To this
+var invoiceCollection = account.InvoicePendingCharges();
+var invoice = invoiceCollection.ChargeInvoice;
+
+// Invoice.MarkFailed now returns a new collection
+// Change this
+invoice.MarkFailed();
+
+// To this
+var invoiceCollection = invoice.MarkFailed();
+var failedInvoice = invoiceCollection.ChargeInvoice;
+```
+
+#### 2. Invoice `Subtotal*` changes
+
+If you want to preserve functionality, change any use of `Invoice#SubtotalAfterDiscountInCents` to `Invoice#SubtotalInCents`. If you were previously using `Invoice#SubtotalInCents`, this has been changed to `Invoice#SubtotalBeforeDiscountInCents`.
+
+#### 3. Invoice Refund -- `refund_apply_order` changed to `refund_method`
+
+The `RefundOrderPriority` enum was changed to `RefundMethod`. Change use of `RefundOrderPriority.Credit` to `RefundMethod.CreditFirst` and `RefundOrderPriority.Transaction` to `RefundMethod.TransactionFirst`.
+
+
+#### 4. Invoice States
+
+If you are checking `Invoice#State` anywhere, you will want to check that you have the new correct values. `collected` has changed to `paid` and `open` has changed to `pending`. Example:
+
+```csharp
+// Change this
+if (invoice.State == Invoice.InvoiceState.Collected) {
+// To this
+if (invoice.State == Invoice.InvoiceState.Paid) {
+
+// Change this
+if (invoice.State == Invoice.InvoiceState.Open) {
+// To this
+if (invoice.State == Invoice.InvoiceState.Pending) {
+```
+
+#### 5. Invoices on Subscription Previews
+
+If you are using `Subscription#Invoice` on subscription previews, you will need to change this to use `Subscription#InvoiceCollection`. To keep functionality the same:
+
+```csharp
+// Change this
+subscription.Preview();
+var invoice = subscription.Invoice;
+
+// To this
+subscription.Preview();
+var invoice = subscription.InvoiceCollection.ChargeInvoice;
+```
+
+1.10.0 (stable) / 2018-03-06
+===============
+
+- Fix unit amounts exceptions when using percentage addons
+- Add filter to InvoiceList, redemption updated_at
+- Changed Coupon.Id from int to long
+- Implement Account Acquisition
+
+### Upgrade Notes
+
+There is one very small breaking change. Coupon.Id changed from an `int` to a `long`. Your code will require a change if you explicitly reference it as an int.
+
 1.9.1 (stable) / 2018-01-22
 ===============
 
@@ -16,7 +264,7 @@ Unreleased
 - API v2.9 changes
 - Fix revenue_schedule_type spelling
 
-Upgrade Notes
+### Upgrade Notes
 
 This version brings us up to API version 2.9. There is a small set of breaking changes coming from PR #263. These properties have been converted to nullable so you may have to unwrap them to use them:
 
@@ -43,16 +291,30 @@ There is one small breaking change in this API version. `TrialRequiresBillingInf
 1.7.0 (stable) / 2017-10-17
 ===============
 
+This release will upgrade us to API version 2.8.
+
 * ImportedTrial flag on Subscription
 * Purchases Notes Changes
 
 ### Upgrade Notes
 
-This release will upgrade us to API version 2.8.
+There are two breaking changes in this API version you must consider. 
 
-There is one breaking change in this API version you must consider. All `country` fields must now contain valid [2 letter ISO 3166 country codes](https://www.iso.org/iso-3166-country-codes.html). If your code fails
-validation, you will receive a validation error. This affects anywhere and address is collected.
+#### Country Codes
+All `Country` fields must now contain valid [2 letter ISO 3166 country codes](https://www.iso.org/iso-3166-country-codes.html). If your country code fails validation, you will receive a validation error. This affects any endpoint where an address is collected.
 
+#### Purchase Currency
+The purchases endpoint can create and invoice multiple adjustments at once but our invoices can only contain items in one currency. To make this explicit the currency can no longer be provided on an adjustment, it must be set once for the entire purchase:
+
+```csharp
+// You must set the currency here
+var purchase = new Purchase(accountCode, currency);
+
+var adj = new Adjustment(4000, "HD Camera", 5);
+// You can no longer set the currency on the adjustment level
+adj.Currency = currency;
+purchase.Adjustments.Add(adj);
+```
 
 1.6.1 (stable) / 2017-10-04
 ===============

@@ -72,6 +72,7 @@ namespace Recurly
         public string Message { get; set; }
         public string ApprovalCode { get; set; }
         public DateTime CollectedAt { get; set; }
+        public TransactionError Error { get; private set; }
 
         public Account Account
         {
@@ -176,7 +177,13 @@ namespace Recurly
                     case "account":
                         href = reader.GetAttribute("href");
                         if (null != href)
+                        {
                             AccountCode = Uri.UnescapeDataString(href.Substring(href.LastIndexOf("/") + 1));
+                        } 
+                        else
+                        {
+                            Account = new Account(reader);
+                        }
                         break;
 
                     case "invoice":
@@ -301,6 +308,9 @@ namespace Recurly
                             CollectedAt = d;
                         }
                         break;
+                    case "transaction_error":
+                        Error = new TransactionError(reader);
+                        break;
                 }
             }
         }
@@ -322,6 +332,18 @@ namespace Recurly
             {
                 Account.WriteXml(xmlWriter);
             }
+
+            xmlWriter.WriteEndElement();
+        }
+
+        internal void WriteOfflinePaymentXml(XmlTextWriter xmlWriter)
+        {
+            xmlWriter.WriteStartElement("transaction");
+
+            xmlWriter.WriteStringIfValid("payment_method", PaymentMethod);
+            xmlWriter.WriteElementString("collected_at", CollectedAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"));
+            xmlWriter.WriteElementString("amount_in_cents", AmountInCents.AsString());
+            xmlWriter.WriteStringIfValid("description", Description);
 
             xmlWriter.WriteEndElement();
         }
@@ -396,6 +418,11 @@ namespace Recurly
 
         public static Transaction Get(string transactionId)
         {
+            if (string.IsNullOrWhiteSpace(transactionId))
+            {
+                return null;
+            }
+
             var transaction = new Transaction();
 
             var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Get,

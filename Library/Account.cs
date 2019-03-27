@@ -35,12 +35,14 @@ namespace Recurly
         public string CompanyName { get; set; }
         public string VatNumber { get; set; }
         public bool? TaxExempt { get; set; }
+        public string ExemptionCertificate { get; set; }
         public string EntityUseCode { get; set; }
         public string AcceptLanguage { get; set; }
         public string CcEmails { get; set; }
         public string HostedLoginToken { get; private set; }
         public DateTime CreatedAt { get; private set; }
         public DateTime UpdatedAt { get; private set; }
+        public DateTime? ClosedAt { get; private set; }
         public bool VatLocationValid { get; private set; }
         public Address Address { get; set; }
         public bool HasLiveSubscription { get; private set; }
@@ -48,6 +50,8 @@ namespace Recurly
         public bool HasFutureSubscription { get; private set; }
         public bool HasCanceledSubscription { get; private set; }
         public bool HasPastDueInvoice { get; private set; }
+        public string PreferredLocale { get; set; }
+        public string ParentAccountCode { get; set; }
 
         private AccountAcquisition _accountAcquisition;
 
@@ -132,6 +136,16 @@ namespace Recurly
             set { _shippingAddresses = value; }
         }
         private List<ShippingAddress> _shippingAddresses;
+
+        /// <summary>
+        /// List of custom fields
+        /// </summary>
+        public List<CustomField> CustomFields
+        {
+            get { return _customFields ?? (_customFields = new List<CustomField>()); }
+            set { _customFields = value; }
+        }
+        private List<CustomField> _customFields;
 
         internal const string UrlPrefix = "/accounts/";
 
@@ -230,29 +244,31 @@ namespace Recurly
         /// <summary>
         /// Posts pending charges on an account
         /// </summary>
-        public Invoice InvoicePendingCharges(Invoice invoice = null)
+        public InvoiceCollection InvoicePendingCharges(Invoice invoice = null)
         {
-            var i = invoice ?? new Invoice();
+            invoice = invoice ?? new Invoice();
+            var collection = new InvoiceCollection();
             Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,
                 UrlPrefix + Uri.EscapeDataString(AccountCode) + "/invoices",
-                i.WriteXml,
-                i.ReadXml);
+                invoice.WriteXml,
+                collection.ReadXml);
 
-            return i;
+            return collection;
         }
 
         /// <summary>
         /// Previews a new invoice for the pending charges on an account
         /// </summary>
-        public Invoice PreviewInvoicePendingCharges(Invoice invoice = null)
+        public InvoiceCollection PreviewInvoicePendingCharges(Invoice invoice = null)
         {
-            var i = invoice ?? new Invoice();
+            invoice = invoice ?? new Invoice(); 
+            var collection = new InvoiceCollection();
             Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,
                 UrlPrefix + Uri.EscapeDataString(AccountCode) + "/invoices/preview",
-                i.WriteXml,
-                i.ReadXml);
+                invoice.WriteXml,
+                collection.ReadXml);
 
-            return i;
+            return collection;
         }
 
         /// <summary>
@@ -358,6 +374,22 @@ namespace Recurly
             return new NoteList(UrlPrefix + Uri.EscapeDataString(AccountCode) + "/notes/");
         }
 
+        public Account GetParentAccount()
+        {
+            if (ParentAccountCode == null) return null;
+            var parent = new Account(ParentAccountCode);
+            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Get,
+                UrlPrefix + Uri.EscapeDataString(ParentAccountCode),
+                parent.ReadXml);
+
+            return statusCode == HttpStatusCode.NotFound ? null : parent;
+        }
+
+        public RecurlyList<Account> GetChildAccounts()
+        {
+            return new AccountList(UrlPrefix + Uri.EscapeDataString(AccountCode) + "/child_accounts");
+        }
+
         /// <summary>
         /// Returns a new adjustment (credit or charge) for this account
         /// </summary>
@@ -416,6 +448,46 @@ namespace Recurly
             return activeRedemptions.ToArray()[0];
         }
 
+        /// <summary>
+        /// Creates a shipping address
+        /// </summary>
+        /// <param name="shippingAddress"></param>
+        /// <returns>ShippingAddress object</returns>
+        public ShippingAddress CreateShippingAddress(ShippingAddress shippingAddress)
+        {
+            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Post,
+                UrlPrefix + Uri.EscapeDataString(AccountCode) + "/shipping_addresses",
+                shippingAddress.WriteXml,
+                shippingAddress.ReadXml);
+
+            return statusCode == HttpStatusCode.Created ? shippingAddress : null;
+        }
+
+        /// <summary>
+        /// Gets all shipping addresses
+        /// </summary>
+        /// <param name="shippingAddress"></param>
+        /// <returns>ShippingAddress object</returns>
+        public ShippingAddress UpdateShippingAddress(ShippingAddress shippingAddress)
+        {
+            var shippingAddressId = shippingAddress.Id;
+            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Put,
+                UrlPrefix + Uri.EscapeDataString(AccountCode) + "/shipping_addresses/" + shippingAddressId,
+                shippingAddress.WriteXml,
+                shippingAddress.ReadXml);
+
+            return statusCode == HttpStatusCode.OK ? shippingAddress : null;
+        }
+
+        /// <summary>
+        /// Deletes a shipping address
+        /// </summary>
+        public void DeleteShippingAddress(long shippingAddressId)
+        {
+            var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Delete,
+                UrlPrefix + Uri.EscapeDataString(AccountCode) + "/shipping_addresses/" + shippingAddressId);
+        }
+
         #region Read and Write XML documents
 
         internal override void ReadXml(XmlTextReader reader)
@@ -432,11 +504,26 @@ namespace Recurly
 
                 if (reader.NodeType != XmlNodeType.Element) continue;
 
+                DateTime dt;
+
                 switch (reader.Name)
                 {
+                   
                     case "account_code":
                         AccountCode = reader.ReadElementContentAsString();
                         break;
+
+                    case "parent_account_code":
+                        ParentAccountCode = reader.ReadElementContentAsString();
+                        break;
+
+                    case "billing_info":
+                       var href = reader.GetAttribute("href");
+                       if (null == href)
+                       {
+                           BillingInfo = new BillingInfo(reader);
+                       }    
+                       break;
 
                     case "state":
                         // TODO investigate in case of incoming data representing multiple states, as https://dev.recurly.com/docs/get-account says is possible
@@ -471,6 +558,10 @@ namespace Recurly
                         TaxExempt = reader.ReadElementContentAsBoolean();
                         break;
 
+                    case "exemption_certificate":
+                        ExemptionCertificate = reader.ReadElementContentAsString();
+                        break;
+
                     case "entity_use_code":
                         EntityUseCode = reader.ReadElementContentAsString();
                         break;
@@ -485,6 +576,11 @@ namespace Recurly
 
                     case "hosted_login_token":
                         HostedLoginToken = reader.ReadElementContentAsString();
+                        break;
+
+                    case "closed_at":
+                        if (DateTime.TryParse(reader.ReadElementContentAsString(), out dt))
+                            ClosedAt = dt;
                         break;
 
                     case "created_at":
@@ -535,6 +631,24 @@ namespace Recurly
                         if (bool.TryParse(reader.ReadElementContentAsString(), out e))
                             HasPastDueInvoice = e;
                         break;
+
+                    case "preferred_locale":
+                        PreferredLocale = reader.ReadElementContentAsString();
+                        break;
+
+                    case "custom_fields":
+                        CustomFields = new List<CustomField>();
+                        while (reader.Read())
+                        {
+                            if (reader.Name == "custom_fields" && reader.NodeType == XmlNodeType.EndElement)
+                                break;
+
+                            if (reader.NodeType == XmlNodeType.Element && reader.Name == "custom_field")
+                            {
+                                CustomFields.Add(new CustomField(reader));
+                            }
+                        }
+                        break;
                 }
             }
         }
@@ -558,11 +672,19 @@ namespace Recurly
             xmlWriter.WriteStringIfValid("vat_number", VatNumber);
             xmlWriter.WriteStringIfValid("entity_use_code", EntityUseCode);
             xmlWriter.WriteStringIfValid("cc_emails", CcEmails);
+            xmlWriter.WriteStringIfValid("preferred_locale", PreferredLocale);
 
             xmlWriter.WriteIfCollectionHasAny("shipping_addresses", ShippingAddresses);
+            xmlWriter.WriteIfCollectionHasAny("custom_fields", CustomFields);
+
+            // Clear the parent account by writing empty string. Null should not clear parent.
+            if (ParentAccountCode != null)
+                xmlWriter.WriteElementString("parent_account_code", ParentAccountCode);
 
             if (TaxExempt.HasValue)
                 xmlWriter.WriteElementString("tax_exempt", TaxExempt.Value.AsString());
+
+            xmlWriter.WriteStringIfValid("exemption_certificate", ExemptionCertificate);
 
             if(_accountAcquisition != null)
                 _accountAcquisition.WriteXml(xmlWriter);
@@ -626,6 +748,11 @@ namespace Recurly
         /// <returns></returns>
         public static Account Get(string accountCode)
         {
+            if (string.IsNullOrWhiteSpace(accountCode))
+            {
+                return null;
+            }
+
             var account = new Account();
             // GET /accounts/<account code>
             var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Get,

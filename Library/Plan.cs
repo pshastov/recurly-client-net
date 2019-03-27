@@ -47,6 +47,12 @@ namespace Recurly
 
         public bool? TrialRequiresBillingInfo { get; set; }
 
+        /// <summary>
+        /// Determines whether subscriptions to this plan should auto-renew term at the end of the current term or expire.
+        /// Defaults to true.
+        /// </summary>
+        public bool? AutoRenew { get; set; }
+
         public Adjustment.RevenueSchedule? RevenueScheduleType { get; set; }
         public Adjustment.RevenueSchedule? SetupFeeRevenueScheduleType { get; set; }
 
@@ -146,6 +152,11 @@ namespace Recurly
 
         public AddOn GetAddOn(string addOnCode)
         {
+            if (string.IsNullOrWhiteSpace(addOnCode))
+            {
+                return null;
+            }
+
             var addOn = new AddOn();
 
             var status = Client.Instance.PerformRequest(Client.HttpRequestMethod.Get,
@@ -206,6 +217,8 @@ namespace Recurly
                     break;
 
                 if (reader.NodeType != XmlNodeType.Element) continue;
+
+                bool b;
 
                 switch (reader.Name)
                 {
@@ -308,7 +321,6 @@ namespace Recurly
                         break;
 
                     case "trial_requires_billing_info":
-                        bool b;
                         if (bool.TryParse(reader.ReadElementContentAsString(), out b))
                             TrialRequiresBillingInfo = b;
                         break;
@@ -323,6 +335,11 @@ namespace Recurly
                         var setupFeeRevenueScheduleType = reader.ReadElementContentAsString();
                         if (!setupFeeRevenueScheduleType.IsNullOrEmpty())
                             SetupFeeRevenueScheduleType = setupFeeRevenueScheduleType.ParseAsEnum<Adjustment.RevenueSchedule>();
+                        break;
+
+                    case "auto_renew":
+                        if (bool.TryParse(reader.ReadElementContentAsString(), out b))
+                            AutoRenew = b;
                         break;
                 }
             }
@@ -384,6 +401,9 @@ namespace Recurly
             if (SetupFeeRevenueScheduleType.HasValue)
                 xmlWriter.WriteElementString("setup_fee_revenue_schedule_type", SetupFeeRevenueScheduleType.Value.ToString().EnumNameToTransportCase());
 
+            if (AutoRenew.HasValue)
+                xmlWriter.WriteElementString("auto_renew", AutoRenew.Value.AsString());
+        
             xmlWriter.WriteEndElement();
         }
 
@@ -446,6 +466,11 @@ namespace Recurly
         /// <returns></returns>
         public static Plan Get(string planCode)
         {
+            if (string.IsNullOrWhiteSpace(planCode))
+            {
+                return null;
+            }
+
             var plan = new Plan();
 
             var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Get,

@@ -17,6 +17,8 @@ namespace Recurly
         /// </summary>
         public TransactionError TransactionError { get; private set; }
 
+        public RecurlyException() { }
+
         internal RecurlyException(Errors errors)
         {
             Errors = errors.ValidationErrors;
@@ -28,7 +30,7 @@ namespace Recurly
             Errors = errors;
         }
 
-        internal RecurlyException(string message)
+        public RecurlyException(string message)
             : base(message)
         { }
 
@@ -47,6 +49,16 @@ namespace Recurly
             : base(message)
         {
             Errors = errors;
+        }
+
+        public override string ToString()
+        {
+            var details = "";
+            foreach (Error e in Errors)
+                details += e.ToString() + "\n";
+            if (TransactionError != null)
+                details += TransactionError.ToString() + "\n";
+            return string.Format("{0} {1}", details, base.ToString());
         }
     }
 }

@@ -81,6 +81,20 @@ namespace Recurly.Test
         }
 
         [Fact]
+        public void CreateAccountAcquisitionWithMandatoryParameters()
+        {
+            var accountCode = GetUniqueAccountCode();
+            var account = new Account(accountCode);
+            account.Create();
+
+            var acquisition = new AccountAcquisition(accountCode);
+            acquisition.Create();
+
+            acquisition = AccountAcquisition.Get(account.AccountCode);
+            acquisition.Should().NotBeNull();
+        }
+
+        [Fact]
         public void UpdateAccountAcquisition()
         {
             var accountCode = GetUniqueAccountCode();

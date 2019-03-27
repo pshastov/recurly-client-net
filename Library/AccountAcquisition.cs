@@ -24,9 +24,9 @@ namespace Recurly
         }
 
         public string AccountCode { get; private set; }
-        public int CostInCents { get; set; }
+        public int? CostInCents { get; set; }
         public string Currency { get; set; }
-        public AccountAcquisitionChannel Channel { get; set; }
+        public AccountAcquisitionChannel? Channel { get; set; }
         public string SubChannel { get; set; }
         public string Campaign { get; set; }
 
@@ -49,6 +49,11 @@ namespace Recurly
 
         public static AccountAcquisition Get(string accountCode)
         {
+            if (string.IsNullOrWhiteSpace(accountCode))
+            {
+                return null;
+            }
+
             var accountAcquisition = new AccountAcquisition();
 
             var statusCode = Client.Instance.PerformRequest(Client.HttpRequestMethod.Get,
@@ -88,6 +93,7 @@ namespace Recurly
                 if (reader.NodeType != XmlNodeType.Element)
                     continue;
 
+                int m;
                 switch (reader.Name)
                 {
                     case "account":
@@ -96,7 +102,8 @@ namespace Recurly
                         break;
 
                     case "cost_in_cents":
-                        CostInCents = reader.ReadElementContentAsInt();
+                        if (int.TryParse(reader.ReadElementContentAsString(), out m))
+                            CostInCents = m;
                         break;
 
                     case "currency":
@@ -104,7 +111,9 @@ namespace Recurly
                         break;
 
                     case "channel":
-                        Channel = reader.ReadElementContentAsString().ParseAsEnum<AccountAcquisitionChannel>();
+                        var elementContent = reader.ReadElementContentAsString();
+                        if (!string.IsNullOrEmpty(elementContent))
+                            Channel = elementContent.ParseAsEnum<AccountAcquisitionChannel>();
                         break;
 
                     case "subchannel":
@@ -121,11 +130,17 @@ namespace Recurly
         internal override void WriteXml(XmlTextWriter xmlWriter)
         {
             xmlWriter.WriteStartElement("account_acquisition"); // Start: Account Acquisition
-            xmlWriter.WriteElementString("cost_in_cents", CostInCents.AsString());
-            xmlWriter.WriteElementString("currency", Currency);
-            xmlWriter.WriteElementString("channel", Channel.ToString().EnumNameToTransportCase());
-            xmlWriter.WriteElementString("subchannel", SubChannel);
-            xmlWriter.WriteElementString("campaign", Campaign);
+            if (CostInCents.HasValue)
+            {
+                xmlWriter.WriteStringIfValid("cost_in_cents", CostInCents.Value.AsString());
+            }
+            xmlWriter.WriteStringIfValid("currency", Currency);
+            if (Channel.HasValue)
+            {
+                xmlWriter.WriteStringIfValid("channel", Channel.Value.ToString().EnumNameToTransportCase());
+            }
+            xmlWriter.WriteStringIfValid("subchannel", SubChannel);
+            xmlWriter.WriteStringIfValid("campaign", Campaign);
             xmlWriter.WriteEndElement(); // End: Account Acquisition
         }
 

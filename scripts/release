@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -e
+
+./scripts/clean
+./scripts/build Release
+mkdir -p ./dist/lib/net47
+cp ./Library/bin/Release/* ./dist/lib/net47/
+cd dist
+nuget pack recurly.nuspec
+nuget push recurly-api-client.*.nupkg -Source https://api.nuget.org/v3/index.json

@@ -43,7 +43,6 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
@@ -53,7 +52,6 @@
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
@@ -65,12 +63,16 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AccountAcquisition.cs" />
+    <Compile Include="CreditPayment.cs" />
+    <Compile Include="CustomField.cs" />
     <Compile Include="Delivery.cs" />
     <Compile Include="GiftCard.cs" />
     <Compile Include="Account.cs" />
     <Compile Include="AccountBalance.cs" />
     <Compile Include="Address.cs" />
     <Compile Include="FilterCriteria.cs" />
+    <Compile Include="InvoiceCollection.cs" />
+    <Compile Include="List\CreditPaymentList.cs" />
     <Compile Include="Purchase.cs" />
     <Compile Include="Errors.cs" />
     <Compile Include="Export.cs" />
@@ -78,6 +80,7 @@
     <Compile Include="List\ExportDateList.cs" />
     <Compile Include="List\ExportFileList.cs" />
     <Compile Include="TransactionError.cs" />
+    <Compile Include="TransactionErrorEnum.cs" />
     <Compile Include="List\UsageList.cs" />
     <Compile Include="List\ShippingAddressList.cs" />
     <Compile Include="ShippingAddress.cs" />
@@ -125,6 +128,7 @@
     <Compile Include="Extensions\StringExtensions.cs" />
     <Compile Include="Subscription.cs" />
     <Compile Include="SubscriptionAddOn.cs" />
+    <Compile Include="SubscriptionChange.cs" />
     <Compile Include="TemporarilyUnavailableException.cs" />
     <Compile Include="Transaction.cs" />
     <Compile Include="List\TransactionList.cs" />
